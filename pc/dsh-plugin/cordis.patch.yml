@@ -1,0 +1,22 @@
+# dsh-islandbridge 组合包（bundle）patch。
+#
+# 本文件由 package.json 的 dsh.bundle.patch 指向；DSH 组合 profile 时，
+# 它是「在 profile 自己的 cordis.patch.yml 之前」的一层，用 insert 把插件挂进树。
+#
+# 顶层必须是 YAML 序列；每条目是 loader patch 条目。
+# insert 里的条目形状与 profile patch 里的插件行一致：id + name (+ 可选 config)。
+#
+# 注意：模块自己导出了 `inject = ['webServer']`，所以这里不必再写 inject；
+# 写在这里也可以（本机 @dsh-packforge/dsh-pack-plugin 就是这么做的）。
+#
+# 要改配置，请在 *profile* 的 cordis.patch.yml 里按 id 覆盖，而不是改本文件：
+#
+#   - id: islandbridge
+#     name: dsh-islandbridge
+#     config:
+#       token: '<你的固定令牌>'
+#       basePath: /islandbridge
+
+- insert:
+    - id: islandbridge
+      name: dsh-islandbridge

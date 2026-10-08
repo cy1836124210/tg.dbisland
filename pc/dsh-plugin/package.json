@@ -1,0 +1,50 @@
+{
+  "name": "dsh-islandbridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "豆包(Doubao) → 星河岛(Island) 桥接的 DSH host 插件（组合包）：SSE 事件总线 /islandbridge/events + POST /islandbridge/event + /islandbridge/health，强制 Bearer 令牌。",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4",
+    "@deepseek-ai/schemastery": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.4"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node test/manifest-test.mjs && node test/schema-test.mjs && node test/run-tests.mjs && node test/sse-wire-test.mjs && node test/real-loader-test.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "doubao",
+    "islandbridge",
+    "sse"
+  ]
+}

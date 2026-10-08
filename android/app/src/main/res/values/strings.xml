@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="perm_control_desc">仅允许与本应用同一证书签名的应用向豆包进程投递发送/删除命令</string>
+</resources>

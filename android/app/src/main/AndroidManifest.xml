@@ -1,0 +1,134 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- ============================================================
+         命令通道的签名级权限（审核问题 1 的整改核心）
+         ============================================================
+         豆包进程内的 LSPosed 模块会注册 com.tg.dbisland.SEND /
+         com.tg.dbisland.DELETE 两个动态接收器，它们能替用户发消息、
+         永久删除会话。原先注册为 RECEIVER_EXPORTED 且不校验发送方，
+         任意应用一条广播即可触发。
+
+         这里定义一个 protectionLevel="signature" 的权限：只有与本应用
+         同一证书签名的应用才可能被授予它。模块在豆包进程内以该权限作为
+         registerReceiver 的 broadcastPermission，系统在投递前强制校验
+         发送方是否持有该权限 —— 第三方应用即使知道 action 名也发不进来。
+
+         权限名不能被第三方“抢注”降级：Android 不允许两个不同签名的包
+         定义同名权限（安装即失败）。
+         ============================================================ -->
+    <permission
+        android:name="com.tg.dbisland.permission.CONTROL"
+        android:protectionLevel="signature"
+        android:label="豆包岛桥控制通道"
+        android:description="@string/perm_control_desc" />
+    <uses-permission android:name="com.tg.dbisland.permission.CONTROL" />
+
+    <!-- 星河岛 SDK 0.1.0 的 AAR 自带 com.astraflow.tool.island.permission.PUBLISH_ACTIVITY
+         与 <queries><package android:name="com.astraflow.tool"/>，构建时自动合并；
+         旧接入库的三条 PUBLISH_ACTIVITY 声明已随之删除，避免声明一个不存在的权限。 -->
+    <!-- 网络权限已全部删除（CHANGELOG 第 34 条）：旧版为了连电脑端的 SSE
+         长连接申请了 INTERNET / ACCESS_NETWORK_STATE，并用
+         usesCleartextTraffic="true" 放行局域网明文 HTTP。电脑端分离后，
+         本应用不再发起任何网络请求 —— 事件只从豆包进程内经 Binder 进来。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 第 45 条：悬浮窗回复面板的「发送」要有振动反馈（用户要求
+         「给发送添加振动事件」）。VIBRATE 是普通权限，安装即授予。 -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 第 45 条（最终形态）：岛上的「回复」按钮 = 弹**本应用自己定制的悬浮窗**
+         输入框（ReplyPanel.kt，TYPE_APPLICATION_OVERLAY），所以这里要
+         SYSTEM_ALERT_WINDOW —— 这是**特殊权限**，只能在系统页里由用户点开，
+         设置页「岛显示」卡片里有一行状态 + 「去授权」入口。
+         这一条**不联网**：网络权限（INTERNET / ACCESS_NETWORK_STATE）依然一个都
+         没申请，事件的来源仍然只有豆包进程内的 LSPosed 模块。 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 第 46 条（真机诊断出来的）：ColorOS 的 OplusHansManager 会**反复冻结**
+          本应用（logcat 实证：`freeze uid: 10045 com.tg.dbisland ... scene:
+          |StrictMode-1|LcdOn`，随后 `OsenseKillAction: KillAction: don't check adj
+          for non perceptible fgs app`）——被冻住的那段时间里，豆包模块推来的
+          事件只能排队，一解冻就「扎堆」冒出来，60 秒未确认通知也不会响。
+          缓解手段就是本应用申请「忽略电池优化」白名单（系统设置页里由用户确认，
+          本应用不静默改任何系统设置）。它同样**与网络无关**。 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <queries>
+        <!-- 只剩 hook 豆包需要的那条：SDK 自带的 com.astraflow.tool 查询声明
+             由 AAR 自动合并，不再手写。 -->
+        <package android:name="com.larus.nova" />
+    </queries>
+
+    <application
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:name=".BridgeApp"
+        android:label="豆包岛桥"
+        android:allowBackup="false"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+
+        <!-- LSPosed module declaration -->
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription"
+            android:value="抓豆包(com.larus.nova)流式回复喂给星河岛 + 桥接保活" />
+        <meta-data android:name="xposedminversion" android:value="82" />
+        <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
+
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".BridgeService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Binder delivery endpoint. Broadcasts to a frozen cached app are
+             DEFER_BY_OPLUS'd and never flushed on thaw; a Binder txn into the
+             provider thawed us in ~1.1s. Exported so Doubao/system_server
+             can reach it — EventProvider enforces a uid allowlist. -->
+        <provider
+            android:name=".EventProvider"
+            android:authorities="com.tg.dbisland.events"
+            android:exported="true"
+            android:grantUriPermissions="false" />
+
+        <!-- keep-alive ping target (woken by LSPosed broadcasts).
+             exported 是必需的（发送方是豆包进程 / system_server，
+             签名与本应用不同），因此授权改在代码里做：BridgeSecurity 按
+             uid 白名单校验发送方，见 Receivers.kt。 -->
+        <receiver android:name=".KeepAliveReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="com.tg.dbisland.KEEPALIVE" />
+                <action android:name="com.tg.dbisland.PING" />
+            </intent-filter>
+        </receiver>
+        <!-- events captured inside the Doubao process by the module.
+             同样是 uid 白名单校验（README「已知限制」记录了 uid 无法归因时的
+             降级行为）。事件只影响岛卡片显示，不触发写操作。
+             旧版的 EVENT_PC（伪装成「电脑端 SSE 帧」的调试入口）已删除。 -->
+        <receiver android:name=".BridgeEventReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="com.tg.dbisland.EVENT" />
+            </intent-filter>
+        </receiver>
+        <!-- island card blank-area tap (openIntent) -> open Doubao + end card.
+             由本应用创建的 PendingIntent（FLAG_IMMUTABLE）触发，发送方 uid 是
+             本应用或星河岛宿主；两者都在白名单内。 -->
+        <receiver android:name=".OpenDoubaoReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="com.tg.dbisland.OPEN_DOUBAO" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name=".BootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+        <!-- 广播无法触发任何写操作：本应用不存在 exported 的 SEND/DELETE
+             入口，那两条命令只在豆包进程内以签名权限接收（见文件开头）。 -->
+    </application>
+</manifest>
