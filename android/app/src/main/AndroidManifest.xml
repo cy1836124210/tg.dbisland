@@ -107,8 +107,7 @@
             </intent-filter>
         </receiver>
         <!-- events captured inside the Doubao process by the module.
-             同样是 uid 白名单校验（README「已知限制」记录了 uid 无法归因时的
-             降级行为）。事件只影响岛卡片显示，不触发写操作。
+             使用 uid 白名单校验，无法确认发送方时拒绝；事件通道拒绝 sim.* 操作。
              旧版的 EVENT_PC（伪装成「电脑端 SSE 帧」的调试入口）已删除。 -->
         <receiver android:name=".BridgeEventReceiver" android:exported="true">
             <intent-filter>
@@ -116,14 +115,13 @@
             </intent-filter>
         </receiver>
         <!-- island card blank-area tap (openIntent) -> open Doubao + end card.
-             由本应用创建的 PendingIntent（FLAG_IMMUTABLE）触发，发送方 uid 是
-             本应用或星河岛宿主；两者都在白名单内。 -->
-        <receiver android:name=".OpenDoubaoReceiver" android:exported="true">
+             由本应用创建的 PendingIntent（FLAG_IMMUTABLE）触发，无需导出接收器。 -->
+        <receiver android:name=".OpenDoubaoReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="com.tg.dbisland.OPEN_DOUBAO" />
             </intent-filter>
         </receiver>
-        <receiver android:name=".BootReceiver" android:exported="true">
+        <receiver android:name=".BootReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>

@@ -4,6 +4,7 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import android.app.AndroidAppHelper
+import com.tg.dbisland.BuildConfig
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -734,7 +735,7 @@ object MessageSender {
         //    字符串（排除纯数字 / UUID / JSON / 空串）。挑不到就返回 null。
         val legacy = legacyName(o, cid)
         if (legacy != null) {
-            XposedBridge.log("$TAG 会话名(legacy) cid=${cid.takeLast(6)} name='$legacy'")
+            XposedBridge.log("$TAG 会话名(legacy) cid=${cid.takeLast(6)} 长度=${legacy.length}")
             return cid to legacy
         }
         XposedBridge.log("$TAG 会话名查询失败 cid=${cid.takeLast(6)}" +
@@ -801,6 +802,7 @@ object MessageSender {
      *  真机第一次查询时打一行，用来核对字段名，之后不再打。 */
     private var convDumpDone = false
     private fun dumpConvObject(o: Any) {
+        if (!BuildConfig.DEBUG) return
         synchronized(this) {
             if (convDumpDone) return
             convDumpDone = true

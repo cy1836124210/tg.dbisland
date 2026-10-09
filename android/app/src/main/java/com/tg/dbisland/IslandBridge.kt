@@ -422,8 +422,7 @@ class IslandBridge(private val ctx: Context,
     // 为什么需要它：多会话/副岛这件事只有造出**两个不同 cid 的会话**才验证得
     // 了，而真实豆包同一时刻只可能有一个会话在答；第 40 条的岛回复链路同理
     // （真手指点岛没法自动化）。`n` 是单调序号，App 用它去重。
-    // 文件在 filesDir，只有本应用自己和 root/adb 能写 —— 所以 release 包
-    // 也可以带这个通道，不需要 debug 包。它只影响岛上的显示与本次会话的收卡。
+    // 本地模拟通道仅在 debug 构建启用；release 不读取文件，也不接受模拟操作。
     //
     // 旧版的 `pc on` / `pc off` 行（模拟「电脑在线且有响应」）已随电脑端一起
     // 删除：不再有「电脑」这个来源，非 JSON 行一律忽略（CHANGELOG 第 34 条）。
@@ -440,6 +439,7 @@ class IslandBridge(private val ctx: Context,
     private var simClearFailed = false // 清空失败只记一次（见 clearSim）
 
     private fun startSimPoller() {
+        if (!BuildConfig.DEBUG) return
         synchronized(this) {
             if (simPollerOn) return
             simPollerOn = true
@@ -727,6 +727,7 @@ class IslandBridge(private val ctx: Context,
 
     fun handle(o: JSONObject) {
         val evt = o.optString("t")
+        if (!BuildConfig.DEBUG && !BridgeSecurity.isIncomingEventAllowed(evt)) return
         // 保活 ping 的静默事件：模块和 App 只是互摸一下确认链路活着，
         // 不上岛、不打日志（每 3s 一条，否则日志面板会被它刷满）
         if (evt == "silent.ping") return
@@ -785,8 +786,8 @@ class IslandBridge(private val ctx: Context,
         // 学会话名（可能比 chat.start 先到，也可能后到）
         if (cname.isNotBlank() && cid.isNotBlank() && convNames[cid] != cname) {
             convNames[cid] = cname
-            // 会话名不是隐私正文：整串打出来，专门给真机验收看（正文永不打印）
-            log("会话名 cid=${tail6(cid)} '$cname'（${cname.length}字）来源=$evt")
+            // 会话名可能包含个人信息，运行日志只记录长度。
+            log("会话名 cid=${tail6(cid)} 长度=${cname.length} 来源=$evt")
         }
         // botId 按会话存（删除会话要用）；会话还不存在时先记一份全局兜底
         val botId = o.optString("botId")
@@ -812,9 +813,8 @@ class IslandBridge(private val ctx: Context,
                 // 不新增卡、不重新响铃、不影响主岛归属。
                 val c = convOf(cid)
                 if (c != null && cname.isNotBlank() && c.title != cname) {
-                    val old = c.title
                     c.title = cname
-                    log("会话标题更新 cid=${tail6(cid)} '$old' → '$cname'")
+                    log("会话标题更新 cid=${tail6(cid)} 长度=${cname.length}")
                     if (c.shown && !c.suppressed) {
                         // 第 48 条：同样走 statusWord，别把「正在删除…」/「已交给
                         // 豆包发送」这类更高优先级的状态改回「回答结束」。
@@ -917,6 +917,7 @@ class IslandBridge(private val ctx: Context,
             // IslandCallback.onAction("reply:<cid>", action) —— 用它就能在没有
             // 真机点击的情况下把「先到者被收掉」这条路径走完（tools/sim_multi.py）。
             "sim.action" -> {
+                if (!BuildConfig.DEBUG) return
                 val a = o.optString("a", ACT_ACK)
                 if (cid.isBlank()) { log("模拟通道动作缺 cid，忽略"); return }
                 val id = ID_REPLY_PREFIX + keyOf(cid)
@@ -928,6 +929,7 @@ class IslandBridge(private val ctx: Context,
             //   —— **与用户手指点岛上「回复」按钮调用的是同一个函数**，
             //   所以「无人值守验证」跑的就是真实那条路。
             "sim.overlay" -> {
+                if (!BuildConfig.DEBUG) return
                 if (cid.isBlank()) { log("模拟通道 sim.overlay 缺 cid，忽略"); return }
                 val id = ID_REPLY_PREFIX + keyOf(cid)
                 log("模拟通道悬浮窗回复 id=$id（与岛上「回复」按钮同一个 onAction）")
@@ -947,6 +949,7 @@ class IslandBridge(private val ctx: Context,
             // 这样「展开→同一 id 换 MessageCard→收到回复→已交给豆包发送」这条
             // 链路可以在没有真手指点岛的情况下完整跑一遍并留下日志。
             "sim.type" -> {
+                if (!BuildConfig.DEBUG) return
                 // 第 48 条：填字进**当前开着的**悬浮窗输入框（等价于用户打字）
                 val text = o.optString("text")
                 val ok = ReplyOverlay.typeIntoLive(text)
@@ -954,6 +957,7 @@ class IslandBridge(private val ctx: Context,
                     "（第 48 条：真机 `input text` 的 DOWN 被框架吃掉，只能这样跑通打字链路）")
             }
             "sim.expand", "sim.collapse", "sim.reply" -> {
+                if (!BuildConfig.DEBUG) return
                 val app = ctx.applicationContext as? BridgeApp
                 if (app == null) { log("模拟通道：App 单例不可用，忽略 $evt"); return }
                 if (cid.isBlank()) { log("模拟通道 $evt 缺 cid，忽略"); return }
@@ -1261,7 +1265,7 @@ class IslandBridge(private val ctx: Context,
     private fun sendReplyToConv(c: Conv, text: String) {
         if (text.isBlank()) return
         // 隐私：只记长度，不打印回复正文
-        log("回复[${c.src}-${c.title}] id=${c.liveId} cid=${tail6(c.cid)}: ${text.length}字")
+        log("回复[${c.src}] id=${c.liveId} cid=${tail6(c.cid)}: ${text.length}字")
         // 第 46 条：**所有**上行路径都在这个唯一漏斗里记一笔 —— 悬浮窗回复面板、
         // 宿主自带回复框、调试入口。旧版只有前两条各自记了一次，悬浮窗
         // 那条**一条都没记**（磁盘上查不到自己发出去的那句，和第 41 条「磁盘与
