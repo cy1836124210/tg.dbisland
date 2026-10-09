@@ -37,8 +37,7 @@ class KeepAliveReceiver : BroadcastReceiver() {
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, i: Intent) {
-        // BOOT_COMPLETED 由 system_server(uid 1000) 投递，白名单内。
-        if (!BridgeSecurity.allowBroadcast(ctx, this)) return
+        // 接收器不导出；BOOT_COMPLETED 是系统保护广播。
         if (i.action == Intent.ACTION_BOOT_COMPLETED) BridgeService.start(ctx)
     }
 }
@@ -48,9 +47,8 @@ class BootReceiver : BroadcastReceiver() {
  *
  *  授权：exported 是必需的（发送方是豆包进程 / system_server，签名与本应用
  *  不同），所以改为在 onReceive 里按 uid 白名单校验发送方
- *  （BridgeSecurity）。伪造事件最多污染岛卡片显示，触发不了写操作；真正的
- *  写操作（发消息 / 删会话）走签名级权限通道，见 AndroidManifest 与
- *  DoubaoHookEntry.registerCommandReceiver。
+ *  （BridgeSecurity），无法确认来源时拒绝。EventSink 另外拒绝所有 sim.*
+ *  操作，避免事件被转为本应用发出的真实回复或删除命令。
  *
  *  NOTE: this is now the *fallback* transport. Broadcasts to a frozen
  *  cached app are DEFER_BY_OPLUS'd and never flushed on thaw, so the
@@ -85,11 +83,10 @@ class BridgeEventReceiver : BroadcastReceiver() {
  *  多会话（v1.2 第 32 条）起每个会话一个 PendingIntent，extra 里带会话 key
  *  （见 IslandBridge.openIntentFor），这里原样透传 → 只收掉被点的那一张卡。
  *
- *  PendingIntent 由本应用创建（FLAG_IMMUTABLE），触发时发送方 uid 是本应用；
- *  星河岛宿主代为 send 的情况也在白名单里。第三方直接发同 action 的广播会被拒。 */
+ *  接收器不导出，只允许通过本应用创建的不可变 PendingIntent 触发；
+ *  星河岛宿主可以使用该 PendingIntent，其他应用不能直接发送广播。 */
 class OpenDoubaoReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, i: Intent) {
-        if (!BridgeSecurity.allowBroadcast(ctx, this)) return
         val app = ctx.applicationContext as BridgeApp
         app.bridge.cardTapped(i.getStringExtra("cid"))
     }

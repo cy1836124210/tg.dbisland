@@ -73,7 +73,9 @@ android {
         // v1.2 第 36 条：整个界面重做成 Compose（liquid glass + 底部 dock + 三页）。
         // 旧实现是纯 View 的 LinearLayout + chat.html WebView，已整体替换。
         compose = true
+        buildConfig = true
     }
+    testOptions { unitTests.isReturnDefaultValues = true }
     lint {
         abortOnError = false
     }
@@ -110,6 +112,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
     implementation("androidx.compose.ui:ui-tooling-preview:1.10.4")
     debugImplementation("androidx.compose.ui:ui-tooling:1.10.4")
+    testImplementation("junit:junit:4.13.2")
 }
 
 // ---- 产物落到 dist/ 并附 SHA-256，便于核对提交的确实是 release 包 ----

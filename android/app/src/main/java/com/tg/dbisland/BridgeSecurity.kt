@@ -2,6 +2,7 @@ package com.tg.dbisland
 
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Process
 import android.util.Log
@@ -17,7 +18,7 @@ import android.util.Log
  *      （见 DoubaoHookEntry.registerCommandReceiver）。这两个动作能替用户发消息、
  *      永久删除会话，属于「以用户名义执行写操作」，只靠包名过滤不够。
  *   2. 本 App 清单里 exported 的 `BridgeEventReceiver` / `KeepAliveReceiver`
- *      / `OpenDoubaoReceiver` —— 这些必须让豆包进程、system_server 打进来，
+ *      —— 这些必须让豆包进程、system_server 打进来，
  *      没法用签名权限（它们签的不是我们的证书），因此按 **uid 白名单**
  *      校验发送方。
  *   3. `EventProvider` —— 同样按 uid 白名单（见 EventProvider.isAllowed）。
@@ -53,7 +54,7 @@ object BridgeSecurity {
      *  · API 34 以下用反射取 @hide 的 `BroadcastReceiver.getSendingUid()`。
      *
      *  返回 -1 表示**无法归因**，分两种情况，都由调用方按各自策略处理
-     *  （命令通道由签名级权限兜底；事件通道放行并告警）：
+     *  （命令通道由签名级权限保护；无权限保护的事件通道拒绝）：
      *    · 发送方 targetSdk ≥ 34 且没开身份共享 —— Android 14 起系统不再附带
      *      发送方身份，公开 API 返回 `Process.INVALID_UID`；
      *    · 取到的 uid **等于接收方自己** —— 这是真机踩出来的坑（v1.2）：
@@ -83,20 +84,7 @@ object BridgeSecurity {
         } catch (_: Throwable) { -1 }
     }
 
-    /**
-     * 清单接收器的守卫：**只拒绝能明确归因、且不在白名单里的发送方**。
-     *
-     * 这样做的原因很实际：`getSendingUid()` 在个别 ROM／投递路径上可能拿不到
-     * 发送方 uid（返回 -1）。若这时一律 fail-closed，
-     * 会把豆包、system_server、root 中继的正常事件一起挡掉，功能直接不可用。
-     * 因此策略是：
-     *   · uid 可信 → 放行；
-     *   · uid 可归因但不可信 → 拒绝（这就是要挡的第三方伪造）；
-     *   · uid 拿不到（-1）→ 放行但记警告，并把这个局限写进 README「已知限制」。
-     *
-     * 真正危险的两个写操作（SEND/DELETE）不走这条宽松路径，它们由系统强制的
-     * 签名级权限兜底，不存在「拿不到 uid 就放行」的空档。
-     */
+    /** 公开事件入口只接受可核实的可信发送方；无法取得身份时拒绝。 */
     fun allowBroadcast(ctx: Context?, r: BroadcastReceiver?): Boolean {
         val uid = senderUid(r)
         if (uid < 0) {
@@ -104,9 +92,9 @@ object BridgeSecurity {
             // （真机实测一轮回答能到十几条），需要时看第一条即可。
             if (!warnedUnknownSender) {
                 warnedUnknownSender = true
-                Log.w(TAG, "bcast sender uid unknown — allowed (see README 已知限制)")
+                Log.w(TAG, "bcast rejected: sender uid unknown")
             }
-            return true
+            return false
         }
         if (isTrustedUid(ctx, uid)) return true
         Log.w(TAG, "bcast rejected: untrusted sender uid=$uid")
@@ -115,6 +103,21 @@ object BridgeSecurity {
 
     /** 事件通道「发送方 uid 拿不到」的告警只打一次（见 [allowBroadcast]）。 */
     @Volatile private var warnedUnknownSender = false
+
+    /** 跨进程事件不能调用本地调试操作，调试包同样执行此限制。 */
+    fun isIncomingEventAllowed(type: String): Boolean =
+        type.isNotBlank() && !type.startsWith("sim.")
+
+    /** Android 14+ 显式提供发送方身份，接收方据此执行白名单校验。 */
+    fun sendIdentifiedBroadcast(ctx: Context, intent: Intent) {
+        if (Build.VERSION.SDK_INT >= 34) {
+            ctx.sendBroadcast(intent, null,
+                android.app.BroadcastOptions.makeBasic()
+                    .setShareIdentityEnabled(true).toBundle())
+        } else {
+            ctx.sendBroadcast(intent)
+        }
+    }
 
     /** 可信 uid 最小集合。 */
     fun isTrustedUid(ctx: Context?, uid: Int): Boolean {
@@ -158,7 +161,7 @@ object BridgeSecurity {
      * 只认豆包进程、root、shell。
      */
     fun allowEventRelaySender(ctx: Context?, uid: Int): Boolean {
-        if (uid < 0) return true
+        if (uid < 0) return false
         if (uid == 0) return true
         if (uid == Process.SHELL_UID) return true
         val c = ctx ?: return false

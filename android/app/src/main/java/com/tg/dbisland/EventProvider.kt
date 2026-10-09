@@ -58,6 +58,7 @@ object EventSink {
     /** @return true if accepted (dispatched now, or queued for app start). */
     fun submit(json: String): Boolean {
         val o = try { JSONObject(json) } catch (e: Exception) { return false }
+        if (!BridgeSecurity.isIncomingEventAllowed(o.optString("t"))) return false
         if (o.optString("t") == "ping") return true
         // dedupe first: the same frame legitimately arrives over several
         // channels, and a queued duplicate must not be replayed twice
@@ -147,9 +148,17 @@ class EventProvider : ContentProvider() {
                 Log.i(TAG_EV, "provider ev uid=$uid len=${raw.length} fresh=$fresh")
             }
             "ping" -> {
-                // pure thaw/probe: no payload, just the Binder txn
+                // 心跳使用 Binder 提供的真实调用方身份，兼容无法归因广播的系统。
+                val fromDoubao = uid == doubaoUid()
+                val ctx = context!!
+                main.post {
+                    if (fromDoubao) {
+                        EnvCheck.noteModulePing()
+                        com.tg.dbisland.ui.BridgeHub.markAlive()
+                    }
+                    try { BridgeService.start(ctx) } catch (_: Throwable) {}
+                }
                 out.putBoolean("ok", true)
-                try { BridgeService.start(context!!) } catch (_: Throwable) {}
             }
             else -> {
                 out.putBoolean("ok", false)

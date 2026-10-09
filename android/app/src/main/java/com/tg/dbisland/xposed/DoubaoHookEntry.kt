@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import com.tg.dbisland.BridgeSecurity
+import com.tg.dbisland.BuildConfig
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
@@ -235,7 +236,7 @@ class DoubaoHookEntry : IXposedHookLoadPackage {
                         }
                         try {
                             if (!callProvider(item.first, item.second)) {
-                                item.first.sendBroadcast(Intent(ACT_EVENT)
+                                BridgeSecurity.sendIdentifiedBroadcast(item.first, Intent(ACT_EVENT)
                                     .setComponent(ComponentName(PKG_SELF, RC_EVENT))
                                     .putExtra("v", 1)
                                     .putExtra("ev", item.second.toString()))
@@ -304,7 +305,7 @@ class DoubaoHookEntry : IXposedHookLoadPackage {
             return try {
                 val b = ctx.contentResolver.call(
                     android.net.Uri.parse("content://" + AUTH_EVENTS),
-                    "event", null,
+                    if (ev.optString("t") == "ping") "ping" else "event", null,
                     android.os.Bundle().apply { putString("ev", ev.toString()) })
                 b?.getBoolean("ok") == true
             } catch (t: Throwable) {
@@ -316,6 +317,11 @@ class DoubaoHookEntry : IXposedHookLoadPackage {
         fun sendTo(ctx: Context?, action: String, receiver: String,
                    ev: JSONObject? = null, src: String? = null) {
             if (ctx == null) return
+            if (action == ACT_KEEPALIVE) {
+                // 使用既有工作队列投递心跳，由 Provider 核实实际调用方。
+                enqueueEvent(ctx, JSONObject().put("t", "ping"))
+                return
+            }
             if (action == ACT_EVENT && ev != null) {
                 enqueueEvent(ctx, ev)
                 return
@@ -336,7 +342,7 @@ class DoubaoHookEntry : IXposedHookLoadPackage {
                 // mistake the second for the first — see EnvCheck.
                 if (src != null) i.putExtra("src", src)
                 if (ev != null) i.putExtra("ev", ev.toString())
-                ctx.sendBroadcast(i)
+                BridgeSecurity.sendIdentifiedBroadcast(ctx, i)
                 // ColorOS OplusAppStartupManager blocks app→app broadcasts
                 // that would start a stopped package (observed: every EVENT
                 // for BridgeEventReceiver dropped). Also fire an implicit
@@ -351,7 +357,7 @@ class DoubaoHookEntry : IXposedHookLoadPackage {
                 // 任何进程会读 ibq.log，继续写只会白占空间，所以一并删掉
                 // （见 CHANGELOG 第 34 条）。
                 if (action == ACT_EVENT && ev != null) {
-                    ctx.sendBroadcast(Intent(ACT_EVENT_RELAY)
+                    BridgeSecurity.sendIdentifiedBroadcast(ctx, Intent(ACT_EVENT_RELAY)
                         .putExtra("v", 1).putExtra("ev", ev.toString()))
                 }
             } catch (t: Throwable) {
@@ -875,6 +881,7 @@ class DoubaoHookEntry : IXposedHookLoadPackage {
     /** 一次性诊断：ConversationDispatcher 列表里的元素长什么样（只打一次）。 */
     private var convListDumped = false
     private fun dumpConvList(l: List<*>) {
+        if (!BuildConfig.DEBUG) return
         synchronized(this) {
             if (convListDumped) return
             convListDumped = true
@@ -904,9 +911,9 @@ class DoubaoHookEntry : IXposedHookLoadPackage {
             }
         }
         if (!first && !force) return
-        // 会话名不是隐私正文，可以整串打；cid 只留后 6 位
+        // 会话名可能包含个人信息，日志只保留长度与部分编号。
         XposedBridge.log("$TAG 会话名[$from] cid=${cid.takeLast(6)} " +
-            "name='$n'（${n.length}字）")
+            "长度=${n.length}")
         try {
             sendTo(ensureCtx(), ACT_EVENT, RC_EVENT, JSONObject()
                 .put("t", "chat.conv").put("cid", cid).put("cname", n))
@@ -1194,7 +1201,7 @@ class DoubaoHookEntry : IXposedHookLoadPackage {
                             "${m.name}($sig)")
                         // dump message-object fields a few times so we can
                         // see where reply text lives
-                        if (dumps <= 3) for (a in p.args ?: return) {
+                        if (BuildConfig.DEBUG && dumps <= 3) for (a in p.args ?: return) {
                             if (a == null || a.javaClass.name.let {
                                     it.startsWith("java.") ||
                                     it.startsWith("kotlin.") }) continue
@@ -1403,7 +1410,7 @@ class DoubaoHookEntry : IXposedHookLoadPackage {
             }
         } catch (_: Throwable) {}
         try {
-            ctx.sendBroadcast(Intent(ACT_EVENT)
+            BridgeSecurity.sendIdentifiedBroadcast(ctx, Intent(ACT_EVENT)
                 .setComponent(ComponentName(PKG_SELF, RC_EVENT))
                 .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
                 .putExtra("v", 1).putExtra("ev", evJson))
